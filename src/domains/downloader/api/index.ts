@@ -1,112 +1,154 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import path from "path";
-import Binance, { CandleChartResult } from "binance-api-node";
+import Binance, {
+  CandleChartInterval_LT,
+  CandleChartResult,
+} from "binance-api-node";
 import { createObjectCsvWriter } from "csv-writer";
-import { existsSync } from "fs";
+import { existsSync, mkdirSync } from "fs";
 import { calculateDeltaTime } from "../utils/date.util";
-import { ServerResponse } from "@shared/interfaces/response.interface";
-import { EResponseStatus } from "@shared/enums/response.enum";
+import { EInterval } from "../enums/binance.enum";
 
 const UPLOAD_DIR = path.join(process.cwd(), "upload");
+
 const LIMIT = 1500;
 
-export const handleDownloadDataRequest = async (request: NextRequest) => {
-  const body = await request.json();
-  const { pathToSave, interval, symbol, isAllSymbol, ...rest } = body;
+export const handleDownloadDataRequest = async (req: NextRequest) => {
+  const url = req.nextUrl;
 
-  const now = new Date();
-  const oneMonthAgo = new Date(
-    now.getFullYear(),
-    now.getMonth() - 1,
-    now.getDate()
-  );
+  const symbol = url.searchParams.get("symbol");
+  const isAllSymbol = url.searchParams.get("isAllSymbol") === "true";
+  let interval = url.searchParams.get("interval");
 
-  const currentYear = now.getFullYear();
-  const startYear = 2019;
-
-  const binance = Binance();
-  const exchangeInfo = await binance.futuresExchangeInfo();
-
-  let symbols = [{ symbol }];
-  if (isAllSymbol) {
-    symbols = exchangeInfo.symbols.filter((x) => x.quoteAsset === "USDT");
+  if (!symbol || !interval) {
+    return;
   }
 
-  //Calculate logic to make sure api will get right data here
-  for (let i = 0; i < symbols.length; i++) {
-    const symbol = symbols[i];
-    console.log(`${i + 1}/${symbols.length} - processing ${symbol.symbol}`);
+  if (!existsSync(UPLOAD_DIR)) {
+    mkdirSync(UPLOAD_DIR, { recursive: true });
+  }
 
-    for (let year = startYear; year <= currentYear; year++) {
+  const stream = new ReadableStream({
+    async start(controller) {
       try {
-        const yearStart = new Date(year, 0, 1).getTime();
-        const yearEnd =
-          year < currentYear
-            ? new Date(year, 11, 31, 23, 59, 59).getTime()
-            : oneMonthAgo.getTime();
+        const now = new Date();
+        const oneMonthAgo = new Date(
+          now.getFullYear(),
+          now.getMonth() - 1,
+          now.getDate()
+        );
+        const currentYear = now.getFullYear();
+        const startYear = 2019;
 
-        const fileName = `${symbol.symbol}_${interval}_${year}.csv`;
-        const fullPath = `${UPLOAD_DIR}/${fileName}`;
-        if (existsSync(fullPath)) {
-          console.log(`  ↪ Skip ${symbol.symbol} ${year} (already exists)`);
-          continue;
+        const binance = Binance();
+        const exchangeInfo = await binance.futuresExchangeInfo();
+
+        let symbols = [{ symbol }];
+        if (isAllSymbol) {
+          symbols = exchangeInfo.symbols.filter((x) => x.quoteAsset === "USDT");
         }
 
-        console.log(`  ↪ Downloading ${symbol.symbol} ${year}`);
-        const datePairs = calculateDeltaTime(
-          yearStart,
-          yearEnd,
-          LIMIT,
-          interval
-        );
+        for (let i = 0; i < symbols.length; i++) {
+          const sym = symbols[i];
+          controller.enqueue(
+            `event: log\ndata: ${i + 1}/${symbols.length} - processing ${
+              sym.symbol
+            }\n\n`
+          );
 
-        let yearData: CandleChartResult[] = [];
+          for (let year = startYear; year <= currentYear; year++) {
+            try {
+              const yearStart = new Date(year, 0, 1).getTime();
+              const yearEnd =
+                year < currentYear
+                  ? new Date(year, 11, 31, 23, 59, 59).getTime()
+                  : oneMonthAgo.getTime();
 
-        for (const pair of datePairs) {
-          await new Promise((resolve) => setTimeout(resolve, 150)); // Delay để tránh bị rate limit
+              const fileName = `${sym.symbol}_${interval}_${year}.csv`;
+              const fullPath = `${UPLOAD_DIR}/${fileName}`;
 
-          try {
-            const response = await binance.futuresCandles({
-              symbol: symbol.symbol,
-              interval,
-              limit: LIMIT,
-              startTime: pair.startDate,
-              endTime: pair.endDate,
-              ...rest,
-            });
-            yearData.push(...response);
-          } catch (error) {
-            console.log(
-              `    ⚠️ Error fetching ${symbol.symbol} from ${new Date(
-                pair.startDate
-              ).toISOString()} to ${new Date(pair.endDate).toISOString()}`
-            );
-            continue;
+              if (existsSync(fullPath)) {
+                controller.enqueue(
+                  `event: log\ndata:   ↪ Skip ${sym.symbol} ${year} (already exists)\n\n`
+                );
+                continue;
+              }
+
+              controller.enqueue(
+                `event: log\ndata:   ↪ Downloading ${sym.symbol} ${year}\n\n`
+              );
+              const datePairs = calculateDeltaTime(
+                yearStart,
+                yearEnd,
+                LIMIT,
+                interval as EInterval
+              );
+
+              let yearData: CandleChartResult[] = [];
+
+              for (const pair of datePairs) {
+                await new Promise((r) => setTimeout(r, 150));
+
+                try {
+                  const response = await binance.futuresCandles({
+                    symbol: sym.symbol,
+                    interval: interval as CandleChartInterval_LT,
+                    limit: LIMIT,
+                    startTime: pair.startDate,
+                    endTime: pair.endDate,
+                  });
+                  yearData.push(...response);
+                } catch (err) {
+                  controller.enqueue(
+                    `event: log\ndata:     ⚠️ Error fetching ${
+                      sym.symbol
+                    } from ${new Date(
+                      pair.startDate
+                    ).toISOString()} to ${new Date(
+                      pair.endDate
+                    ).toISOString()}\n\n`
+                  );
+                }
+              }
+
+              if (yearData.length > 0) {
+                const writer = createObjectCsvWriter({
+                  path: fullPath,
+                  header: Object.keys(yearData[0]).map((k) => ({
+                    id: k,
+                    title: k,
+                  })),
+                });
+                await writer.writeRecords(yearData);
+                controller.enqueue(
+                  `event: log\ndata:     ✅ Saved ${fileName}\n\n`
+                );
+              } else {
+                controller.enqueue(
+                  `event: log\ndata:     ⚠️ No data for ${sym.symbol} in ${year}\n\n`
+                );
+              }
+            } catch (err) {
+              controller.enqueue(
+                `event: log\ndata:     ❌ Error processing ${
+                  sym.symbol
+                } ${year}: ${(err as Error).message}\n\n`
+              );
+            }
           }
         }
 
-        if (yearData.length > 0) {
-          const writer = createObjectCsvWriter({
-            path: fullPath,
-            header: Object.keys(yearData[0]).map((key) => ({
-              id: key,
-              title: key,
-            })),
-          });
-          await writer.writeRecords(yearData);
-          console.log(`    ✅ Saved ${fileName}`);
-        } else {
-          console.log(`    ⚠️ No data for ${symbol.symbol} in ${year}`);
-        }
-      } catch (err) {
-        console.log(`    ❌ Error processing ${symbol.symbol} ${year}:`, err);
-        continue;
+        controller.enqueue(
+          `event: done\ndata: 🎉 All data is downloaded by symbol and year\n\n`
+        );
+        controller.close();
+      } catch (e) {
+        controller.enqueue(
+          `event: error\ndata: ❌ ${(e as Error).message}\n\n`
+        );
+        controller.close();
       }
-    }
-  }
-  console.log("🎉 All data is downloaded by symbol and year");
-
-  return NextResponse.json(
-    new ServerResponse(EResponseStatus.Success, "All data is downloaded")
-  );
+    },
+  });
+  return stream;
 };
