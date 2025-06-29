@@ -106,7 +106,7 @@ export const handleDownloadDataRequest = async (req: NextRequest) => {
                       pair.startDate
                     ).toISOString()} to ${new Date(
                       pair.endDate
-                    ).toISOString()}\n\n`
+                    ).toISOString()} ${JSON.stringify(err)}\n\n`
                   );
                 }
               }
@@ -132,7 +132,7 @@ export const handleDownloadDataRequest = async (req: NextRequest) => {
               controller.enqueue(
                 `event: log\ndata:     ❌ Error processing ${
                   sym.symbol
-                } ${year}: ${(err as Error).message}\n\n`
+                } ${year}: ${JSON.stringify(err)}\n\n`
               );
             }
           }
@@ -143,9 +143,7 @@ export const handleDownloadDataRequest = async (req: NextRequest) => {
         );
         controller.close();
       } catch (e) {
-        controller.enqueue(
-          `event: error\ndata: ❌ ${(e as Error).message}\n\n`
-        );
+        controller.enqueue(`event: error\ndata: ❌ ${JSON.stringify(e)}\n\n`);
         controller.close();
       }
     },

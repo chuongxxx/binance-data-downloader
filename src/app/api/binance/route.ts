@@ -2,7 +2,6 @@ import { handleDownloadDataRequest } from "@domains/downloader/api";
 import { NextRequest, NextResponse } from "next/server";
 
 export const GET = async (request: NextRequest) => {
-  console.log("GET", request.nextUrl.toJSON());
   const headers = {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache, no-transform",
