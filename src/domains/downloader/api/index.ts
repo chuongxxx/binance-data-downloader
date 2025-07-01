@@ -12,6 +12,7 @@ import { EInterval } from "../enums/binance.enum";
 const UPLOAD_DIR = path.join(process.cwd(), "upload");
 
 const LIMIT = 1500;
+const DELAY = 150;
 
 export const handleDownloadDataRequest = async (req: NextRequest) => {
   const url = req.nextUrl;
@@ -74,6 +75,15 @@ export const handleDownloadDataRequest = async (req: NextRequest) => {
                 continue;
               }
 
+              if (year < currentYear) {
+                const nextYear = year + 1;
+                const nextYearFileName = `${sym.symbol}_${interval}_${nextYear}.csv`;
+                const fullNextYearPath = `${UPLOAD_DIR}/${nextYearFileName}`;
+                if (existsSync(fullNextYearPath)) {
+                  continue;
+                }
+              }
+
               controller.enqueue(
                 `event: log\ndata:   ↪ Downloading ${sym.symbol} ${year}\n\n`
               );
@@ -87,7 +97,7 @@ export const handleDownloadDataRequest = async (req: NextRequest) => {
               let yearData: CandleChartResult[] = [];
 
               for (const pair of datePairs) {
-                await new Promise((r) => setTimeout(r, 150));
+                await new Promise((r) => setTimeout(r, DELAY));
 
                 try {
                   const response = await binance.futuresCandles({
