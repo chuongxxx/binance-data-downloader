@@ -10,11 +10,32 @@ export const calculateDeltaTime = (
   //Convert interval to ms
   let intervalNumber = 60 * 1000;
   switch (interval) {
-    case EInterval.Five_Minute:
-      intervalNumber *= 5;
+    case EInterval.One_Minute:
+      intervalNumber *= 1;
       break;
     case EInterval.Three_Minute:
       intervalNumber *= 3;
+      break;
+    case EInterval.Five_Minute:
+      intervalNumber *= 5;
+      break;
+    case EInterval.Fifteen_Minute:
+      intervalNumber *= 15;
+      break;
+    case EInterval.Thirty_Minute:
+      intervalNumber *= 30;
+      break;
+    case EInterval.One_Hour:
+      intervalNumber * 60;
+      break;
+    case EInterval.Two_Hour:
+      intervalNumber *= 120;
+      break;
+    case EInterval.Four_Hour:
+      intervalNumber *= 240;
+      break;
+    case EInterval.One_Day:
+      intervalNumber *= 1440;
       break;
     default:
       break;
