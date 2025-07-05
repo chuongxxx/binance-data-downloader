@@ -84,15 +84,6 @@ export const handleDownloadDataRequest = async (req: NextRequest) => {
                 continue;
               }
 
-              if (year < currentYear) {
-                const nextYear = currentYear - 1;
-                const nextYearFileName = `${sym.symbol}_${interval}_${nextYear}.csv`;
-                const fullNextYearPath = `${UPLOAD_DIR}/${nextYearFileName}`;
-                if (existsSync(fullNextYearPath)) {
-                  continue;
-                }
-              }
-
               controller.enqueue(
                 `event: log\ndata:   ↪ Downloading ${sym.symbol} ${year}\n\n`
               );
