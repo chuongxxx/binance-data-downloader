@@ -33,13 +33,11 @@ export const handleDownloadDataRequest = async (req: NextRequest) => {
     async start(controller) {
       try {
         const now = new Date();
-        const oneMonthAgo = new Date(
-          now.getFullYear(),
-          now.getMonth() - 1,
-          now.getDate()
-        );
+
         const currentYear = now.getFullYear();
         const startYear = 2019;
+
+        const lastFullMonthIndex = now.getMonth() - 2;
 
         const binance = Binance();
         const exchangeInfo = await binance.futuresExchangeInfo();
@@ -57,14 +55,25 @@ export const handleDownloadDataRequest = async (req: NextRequest) => {
             }\n\n`
           );
 
-          for (let year = startYear; year <= currentYear; year++) {
+          for (let year = currentYear; year >= startYear; year--) {
             try {
-              const yearStart = new Date(year, 0, 1).getTime();
-              const yearEnd =
-                year < currentYear
-                  ? new Date(year, 11, 31, 23, 59, 59).getTime()
-                  : oneMonthAgo.getTime();
+              let yearStartTs: number;
+              let yearEndTs: number;
 
+              if (year === currentYear) {
+                if (lastFullMonthIndex < 0) {
+                  controller.enqueue(
+                    `event: log\ndata:   ↪ Skip ${sym.symbol} ${year} (no full month data yet)\n\n`
+                  );
+                  continue;
+                }
+                yearStartTs = new Date(year, 0, 1).getTime();
+                yearEndTs =
+                  new Date(year, lastFullMonthIndex + 1, 1).getTime() - 1;
+              } else {
+                yearStartTs = new Date(year, 0, 1).getTime();
+                yearEndTs = new Date(year, 11, 31, 23, 59, 59).getTime();
+              }
               const fileName = `${sym.symbol}_${interval}_${year}.csv`;
               const fullPath = `${UPLOAD_DIR}/${fileName}`;
 
@@ -76,7 +85,7 @@ export const handleDownloadDataRequest = async (req: NextRequest) => {
               }
 
               if (year < currentYear) {
-                const nextYear = year + 1;
+                const nextYear = currentYear - 1;
                 const nextYearFileName = `${sym.symbol}_${interval}_${nextYear}.csv`;
                 const fullNextYearPath = `${UPLOAD_DIR}/${nextYearFileName}`;
                 if (existsSync(fullNextYearPath)) {
@@ -88,8 +97,8 @@ export const handleDownloadDataRequest = async (req: NextRequest) => {
                 `event: log\ndata:   ↪ Downloading ${sym.symbol} ${year}\n\n`
               );
               const datePairs = calculateDeltaTime(
-                yearStart,
-                yearEnd,
+                yearStartTs,
+                yearEndTs,
                 LIMIT,
                 interval as EInterval
               );
@@ -121,23 +130,24 @@ export const handleDownloadDataRequest = async (req: NextRequest) => {
                 }
               }
 
-              if (yearData.length > 0) {
-                const writer = createObjectCsvWriter({
-                  path: fullPath,
-                  header: Object.keys(yearData[0]).map((k) => ({
-                    id: k,
-                    title: k,
-                  })),
-                });
-                await writer.writeRecords(yearData);
+              if (yearData.length === 0) {
                 controller.enqueue(
-                  `event: log\ndata:     ✅ Saved ${fileName}\n\n`
+                  `event: log\ndata:   ↪ ❌ No data for ${sym.symbol} in ${year}, skip symbol\n\n`
                 );
-              } else {
-                controller.enqueue(
-                  `event: log\ndata:     ⚠️ No data for ${sym.symbol} in ${year}\n\n`
-                );
+                break;
               }
+
+              const writer = createObjectCsvWriter({
+                path: fullPath,
+                header: Object.keys(yearData[0]).map((k) => ({
+                  id: k,
+                  title: k,
+                })),
+              });
+              await writer.writeRecords(yearData);
+              controller.enqueue(
+                `event: log\ndata:     ✅ Saved ${fileName}\n\n`
+              );
             } catch (err) {
               controller.enqueue(
                 `event: log\ndata:     ❌ Error processing ${
